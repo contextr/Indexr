@@ -144,7 +144,7 @@ public class Lucene implements CommandLineRunner {
 			document.add(user);
 			document.add(frequency);
 //			document.add(frequencyDoc);
-			prefix.setBoost(input.getPrefix().split("_").length*freq*(1+2.0f/input.getNext().length()));
+			prefix.setBoost(input.getPrefix().split("_").length*freq/**(1+2.0f/input.getNext().length())*/);
 			
 			try {
 				writer.addDocument(document);
@@ -158,37 +158,37 @@ public class Lucene implements CommandLineRunner {
 			}
 		});
 		
-		words.forEach(w -> {
-			TextField profile = new TextField("profile", "Dictionary", Store.NO);
-			TextField prefix = new TextField("prefix", "", Store.NO);
-			TextField next = new TextField("next", w, Store.YES);
-			TextField nextPieces = new TextField("nextPieces", pieces(w), Store.NO);
-			TextField user = new TextField("user", String.valueOf(1), Store.NO);
-			
-//			NumericDocValuesField frequencyDoc = new NumericDocValuesField("freq", freq);
-			IntField frequency = new IntField("frequency", 1, Store.YES);
-			
-			Document document = new Document();
-			document.add(profile);
-			document.add(prefix);
-			document.add(next);
-			document.add(nextPieces);
-			document.add(user);
-			document.add(frequency);
-//			document.add(frequencyDoc);
-			prefix.setBoost(0.25f*(1+2.0f/w.length()));
-			
-			try {
-				writer.addDocument(document);
-			} catch (Exception e) {
-				try {
-					writer.close();
-				} catch (Exception e1) {
-					throw new RuntimeException(e1);
-				}
-				throw new RuntimeException(e);
-			}
-		});
+//		words.forEach(w -> {
+//			TextField profile = new TextField("profile", "Dictionary", Store.NO);
+//			TextField prefix = new TextField("prefix", "", Store.NO);
+//			TextField next = new TextField("next", w, Store.YES);
+//			TextField nextPieces = new TextField("nextPieces", pieces(w), Store.NO);
+//			TextField user = new TextField("user", String.valueOf(1), Store.NO);
+//			
+////			NumericDocValuesField frequencyDoc = new NumericDocValuesField("freq", freq);
+//			IntField frequency = new IntField("frequency", 1, Store.YES);
+//			
+//			Document document = new Document();
+//			document.add(profile);
+//			document.add(prefix);
+//			document.add(next);
+//			document.add(nextPieces);
+//			document.add(user);
+//			document.add(frequency);
+////			document.add(frequencyDoc);
+//			prefix.setBoost(0.25f*(1+2.0f/w.length()));
+//			
+//			try {
+//				writer.addDocument(document);
+//			} catch (Exception e) {
+//				try {
+//					writer.close();
+//				} catch (Exception e1) {
+//					throw new RuntimeException(e1);
+//				}
+//				throw new RuntimeException(e);
+//			}
+//		});
 		
 		writer.commit();
 		writer.close();
