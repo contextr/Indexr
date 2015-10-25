@@ -1,108 +1,206 @@
 package lucene;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Scanner;
 import java.util.Stack;
 import java.util.StringJoiner;
 
-import javax.persistence.EntityManager;
-import javax.persistence.PersistenceContext;
-
-import org.apache.commons.lang.StringEscapeUtils;
-import org.codehaus.jackson.map.ObjectMapper;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.lucene.analysis.core.WhitespaceAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field.Store;
+import org.apache.lucene.document.IntField;
+import org.apache.lucene.document.TextField;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.IndexWriterConfig.OpenMode;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.NIOFSDirectory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.concurrent.ScheduledExecutorFactoryBean;
+
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @SpringBootApplication
 @ComponentScan(basePackages = "lucene")
-//@Transactional
+// @Transactional
 @EnableAsync
 public class Lucene implements CommandLineRunner {
 
-	@Autowired
-	private InputDAO dao;
-
-	@PersistenceContext
-	private EntityManager entityManager;
+	Map<Input, Integer> inputFrequencyMap;
+	List<String> words;
+	
+	private Directory directory;
 
 	public static void main(String[] args) throws IOException {
 		SpringApplication.run(Lucene.class, args);
 	}
 
-	@SuppressWarnings("unchecked")
+	@Bean
+	public ScheduledExecutorFactoryBean executorService() {
+		ScheduledExecutorFactoryBean bean = new ScheduledExecutorFactoryBean();
+		bean.setPoolSize(50);
+		return bean;
+	}
+
 	public void run(String... args) throws Exception {
-
-		ObjectMapper mapper = new ObjectMapper();
-		List readValue = mapper.readValue(new File("output"), List.class);
+		directory = new NIOFSDirectory(new File("lucene").toPath());
+		inputFrequencyMap = new HashMap<>();
+		words = new LinkedList<>();
 		
-		StringJoiner builder = new StringJoiner("\n");
-		readValue.forEach(o -> {
-			Map<String, String> map = ((Map<String, String>) o);
-			builder.add(map.get("text"));
-		});
+		readAndExtract("output", "Physics");
+		readAndExtract("history", "History");
+		addDictionary("words");
+		createIndex();
+		
+	}
 
-		String data = builder.toString();
+	private void addDictionary(String string) throws FileNotFoundException {
+		Scanner scanner = new Scanner(new File(string));
+		while(scanner.hasNext()){
+			String word = scanner.next();
+			this.words.add(word);
+		}
+		scanner.close();
+	}
 
-		List<String> strings = extractSentences(data);
+	@SuppressWarnings("unchecked")
+	private void readAndExtract(String fileName, String profile) throws IOException, JsonParseException, JsonMappingException {
+		List<String> strings;
+
+		{
+			ObjectMapper mapper = new ObjectMapper();
+			@SuppressWarnings("rawtypes")
+			List readValue = mapper.readValue(new File(fileName), List.class);
+			StringJoiner builder = new StringJoiner("\n");
+			readValue.forEach(o -> {
+				Map<String, String> map = ((Map<String, String>) o);
+				builder.add(map.get("text"));
+			});
+
+			String data = builder.toString();
+
+			strings = extractSentences(data);
+		}
+
 		int size = strings.size();
 		int curr = 0;
 		for (String sentence : strings) {
 			curr++;
 			System.out.println((float) curr / size);
 			String[] words = sentence.split(" ");
+
 			for (int i = 0; i < words.length; i++) {
 
 				List<String> prefix = getPrefix(words, i);
 
 				for (String string : prefix) {
 					Input input = new Input();
-					input.setPid(1);
+					input.setProfile(profile);
 					input.setUid(1);
 					input.setFrequency(1);
-					input.setPrefix(string);
+					input.setPrefix(string.toLowerCase());
 					input.setNext(words[i]);
-					dao.addInput(input);
+					incrementInIndex(input);
 				}
 			}
 		}
 	}
 
-	/*
-	 * FullTextEntityManager fullTextEntityManager =
-	 * org.hibernate.search.jpa.Search .getFullTextEntityManager(entityManager);
-	 * try { fullTextEntityManager.createIndexer().startAndWait(); } catch
-	 * (InterruptedException e) { System.out.println(
-	 * "An error occurred trying to build the serach index: " + e.toString()); }
-	 * 
-	 * Scanner scanner = new Scanner(System.in);
-	 * 
-	 * if (scanner.hasNextLine()) { String input = scanner.nextLine();
-	 * 
-	 * long currentTimeMillis = System.currentTimeMillis(); QueryBuilder
-	 * queryBuilder =
-	 * fullTextEntityManager.getSearchFactory().buildQueryBuilder().
-	 * forEntity(Input.class).get(); Query query = queryBuilder.phrase()
-	 * .onField("prefix") .sentence(input) .createQuery(); FullTextQuery
-	 * jpaQuery = fullTextEntityManager.createFullTextQuery(query, Input.class);
-	 * jpaQuery.setMaxResults(15); List resultList = jpaQuery.getResultList();
-	 * System.out.println(System.currentTimeMillis()-currentTimeMillis);
-	 * System.out.println(resultList);
-	 * 
-	 * Iterable<Input> findByPrefixAndNext = jpa.findByPrefixAndNext("The",
-	 * "war"); for (Input inp : findByPrefixAndNext) { System.out.println(inp);
-	 * inp.setFrequency(5); jpa.save(inp); System.out.println(inp);
-	 * System.out.println(inp.getId()); entityManager.refresh(inp); } }
-	 * scanner.close();
-	 */
+	private void createIndex() throws IOException {
+		IndexWriterConfig conf = new IndexWriterConfig(new WhitespaceAnalyzer());
+		conf.setOpenMode(OpenMode.CREATE_OR_APPEND);
+		IndexWriter writer = new IndexWriter(directory, conf);
+		inputFrequencyMap.forEach((input, freq) -> {
+			
+			TextField profile = new TextField("profile", input.getProfile(), Store.NO);
+			TextField prefix = new TextField("prefix", input.getPrefix(), Store.NO);
+			TextField next = new TextField("next", input.getNext(), Store.YES);
+			TextField nextPieces = new TextField("nextPieces", pieces(input.getNext()), Store.NO);
+			TextField user = new TextField("user", String.valueOf(input.getUid()), Store.NO);
+			
+//			NumericDocValuesField frequencyDoc = new NumericDocValuesField("freq", freq);
+			IntField frequency = new IntField("frequency", freq, Store.YES);
+			
+			Document document = new Document();
+			document.add(profile);
+			document.add(prefix);
+			document.add(next);
+			document.add(nextPieces);
+			document.add(user);
+			document.add(frequency);
+//			document.add(frequencyDoc);
+			prefix.setBoost(input.getPrefix().split("_").length*freq*(1+2.0f/input.getNext().length()));
+			
+			try {
+				writer.addDocument(document);
+			} catch (Exception e) {
+				try {
+					writer.close();
+				} catch (Exception e1) {
+					throw new RuntimeException(e1);
+				}
+				throw new RuntimeException(e);
+			}
+		});
+		
+		words.forEach(w -> {
+			TextField profile = new TextField("profile", "Dictionary", Store.NO);
+			TextField prefix = new TextField("prefix", "", Store.NO);
+			TextField next = new TextField("next", w, Store.YES);
+			TextField nextPieces = new TextField("nextPieces", pieces(w), Store.NO);
+			TextField user = new TextField("user", String.valueOf(1), Store.NO);
+			
+//			NumericDocValuesField frequencyDoc = new NumericDocValuesField("freq", freq);
+			IntField frequency = new IntField("frequency", 1, Store.YES);
+			
+			Document document = new Document();
+			document.add(profile);
+			document.add(prefix);
+			document.add(next);
+			document.add(nextPieces);
+			document.add(user);
+			document.add(frequency);
+//			document.add(frequencyDoc);
+			prefix.setBoost(0.25f*(1+2.0f/w.length()));
+			
+			try {
+				writer.addDocument(document);
+			} catch (Exception e) {
+				try {
+					writer.close();
+				} catch (Exception e1) {
+					throw new RuntimeException(e1);
+				}
+				throw new RuntimeException(e);
+			}
+		});
+		
+		writer.commit();
+		writer.close();
+	}
+
+	private String pieces(String next) {
+		StringJoiner joiner = new StringJoiner(" ");
+		for (int i = 1; i <= next.length(); i++) {
+			joiner.add(next.substring(0, i).toLowerCase());
+		}
+		return joiner.toString();
+	}
 
 	private List<String> extractSentences(String data) {
 		String[] lines = data.split("([.?!:;,](?=\\s)|\\R)");
@@ -161,12 +259,10 @@ public class Lucene implements CommandLineRunner {
 
 			if (string.isEmpty())
 				continue;
-			
-			string = StringEscapeUtils.escapeSql(string);
-			
+
 			strings.add(string);
-			System.out.println(string);
 		}
+		System.out.println("Done with extraction");
 		return strings;
 	}
 
@@ -184,6 +280,14 @@ public class Lucene implements CommandLineRunner {
 		}
 
 		return list;
+	}
+
+	private void incrementInIndex(Input input) throws IOException {
+		Integer integer = inputFrequencyMap.get(input);
+		if(integer == null){
+			integer = 0;
+		}
+		inputFrequencyMap.put(input, integer+1);
 	}
 
 }

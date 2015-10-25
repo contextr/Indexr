@@ -1,46 +1,49 @@
 package lucene;
 
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.Id;
+import java.io.Serializable;
+import java.util.LinkedList;
+import java.util.StringJoiner;
 
-import org.hibernate.search.annotations.Indexed;
-
-@Indexed
-@Entity(name="input")
-public class Input {
+//@Indexed
+//@Entity(name="input")
+public class Input implements Serializable {
+	private static final long serialVersionUID = 5517056608258504818L;
 	
-	@Id @GeneratedValue
-	private Integer id;
-	private String prefix;
+	//	@Id @GeneratedValue
+	private LinkedList<String> prefix;
 	private String next;
-	private Integer pid;
+	private String profile;
 	private Integer uid;
 	private Integer frequency;
 	
-	public final Integer getId() {
-		return id;
-	}
-	public final void setId(Integer id) {
-		this.id = id;
-	}
 	public final String getPrefix() {
-		return prefix;
+		StringJoiner joiner = new StringJoiner("_");
+		for (String string : prefix) {
+			joiner.add(string);
+		}
+		return joiner.toString();
 	}
 	public final void setPrefix(String prefix) {
-		this.prefix = prefix;
+		String[] split = prefix.split(" ");
+		this.prefix = new LinkedList<>();
+		for (String string : split) {
+			this.prefix.add(string.intern());
+		}
 	}
 	public final String getNext() {
 		return next;
 	}
 	public final void setNext(String next) {
-		this.next = next;
+		this.next = next.intern();
 	}
-	public final Integer getPid() {
-		return pid;
+	public final String getProfile() {
+		return profile;
 	}
-	public final void setPid(Integer pid) {
-		this.pid = pid;
+	public final void setProfile(String profile) {
+		this.profile = profile;
+	}
+	public final void setPrefix(LinkedList<String> prefix) {
+		this.prefix = prefix;
 	}
 	public final Integer getUid() {
 		return uid;
@@ -54,6 +57,7 @@ public class Input {
 	public final void setFrequency(Integer frequency) {
 		this.frequency = frequency;
 	}
+	
 	@Override
 	public String toString() {
 		return "Input [prefix=" + prefix + ", next=" + next + ", frequency=" + frequency + "]";
