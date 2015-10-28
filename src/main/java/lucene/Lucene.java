@@ -62,7 +62,7 @@ public class Lucene implements CommandLineRunner {
 		inputFrequencyMap = new HashMap<>();
 		words = new LinkedList<>();
 		
-		readAndExtract("output", "Physics");
+		readAndExtract("physics", "Physics");
 		readAndExtract("history", "History");
 		addDictionary("words");
 		
