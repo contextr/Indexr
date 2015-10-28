@@ -34,10 +34,10 @@ import org.springframework.scheduling.concurrent.ScheduledExecutorFactoryBean;
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
 
 @SpringBootApplication
 @ComponentScan(basePackages = "lucene")
-// @Transactional
 @EnableAsync
 public class Lucene implements CommandLineRunner {
 
@@ -65,6 +65,12 @@ public class Lucene implements CommandLineRunner {
 		readAndExtract("output", "Physics");
 		readAndExtract("history", "History");
 		addDictionary("words");
+		
+/*		ObjectMapper mapper = new ObjectMapper();
+		ObjectWriter writerWithDefaultPrettyPrinter = mapper.writerWithDefaultPrettyPrinter();
+		writerWithDefaultPrettyPrinter.writeValue(new File("json"),inputFrequencyMap);
+*/		
+		
 		createIndex();
 		
 	}
@@ -73,6 +79,8 @@ public class Lucene implements CommandLineRunner {
 		Scanner scanner = new Scanner(new File(string));
 		while(scanner.hasNext()){
 			String word = scanner.next();
+			if(word.length()<3)
+				continue;
 			this.words.add(word);
 		}
 		scanner.close();
@@ -107,7 +115,7 @@ public class Lucene implements CommandLineRunner {
 			for (int i = 0; i < words.length; i++) {
 
 				List<String> prefix = getPrefix(words, i);
-
+				
 				for (String string : prefix) {
 					Input input = new Input();
 					input.setProfile(profile);
@@ -144,7 +152,7 @@ public class Lucene implements CommandLineRunner {
 			document.add(user);
 			document.add(frequency);
 //			document.add(frequencyDoc);
-			prefix.setBoost(input.getPrefix().split("_").length*freq/**(1+2.0f/input.getNext().length())*/);
+			prefix.setBoost(input.getPrefix().split("_").length*freq);
 			
 			try {
 				writer.addDocument(document);
@@ -158,38 +166,38 @@ public class Lucene implements CommandLineRunner {
 			}
 		});
 		
-//		words.forEach(w -> {
-//			TextField profile = new TextField("profile", "Dictionary", Store.NO);
-//			TextField prefix = new TextField("prefix", "", Store.NO);
-//			TextField next = new TextField("next", w, Store.YES);
-//			TextField nextPieces = new TextField("nextPieces", pieces(w), Store.NO);
-//			TextField user = new TextField("user", String.valueOf(1), Store.NO);
-//			
-////			NumericDocValuesField frequencyDoc = new NumericDocValuesField("freq", freq);
-//			IntField frequency = new IntField("frequency", 1, Store.YES);
-//			
-//			Document document = new Document();
-//			document.add(profile);
-//			document.add(prefix);
-//			document.add(next);
-//			document.add(nextPieces);
-//			document.add(user);
-//			document.add(frequency);
-////			document.add(frequencyDoc);
-//			prefix.setBoost(0.25f*(1+2.0f/w.length()));
-//			
-//			try {
-//				writer.addDocument(document);
-//			} catch (Exception e) {
-//				try {
-//					writer.close();
-//				} catch (Exception e1) {
-//					throw new RuntimeException(e1);
-//				}
-//				throw new RuntimeException(e);
-//			}
-//		});
-		
+		words.stream()
+		.sorted((o1,o2) -> o1.length()-o2.length())
+		.forEach(w -> {
+			TextField profile = new TextField("profile", "Dictionary", Store.NO);
+			TextField prefix = new TextField("prefix", "", Store.NO);
+			TextField next = new TextField("next", w, Store.YES);
+			TextField nextPieces = new TextField("nextPieces", pieces(w), Store.NO);
+			TextField user = new TextField("user", String.valueOf(1), Store.NO);
+			
+//			NumericDocValuesField frequencyDoc = new NumericDocValuesField("freq", freq);
+			IntField frequency = new IntField("frequency", 1, Store.YES);
+			
+			Document document = new Document();
+			document.add(profile);
+			document.add(prefix);
+			document.add(next);
+			document.add(nextPieces);
+			document.add(user);
+			document.add(frequency);
+//			document.add(frequencyDoc);
+			
+			try {
+				writer.addDocument(document);
+			} catch (Exception e) {
+				try {
+					writer.close();
+				} catch (Exception e1) {
+					throw new RuntimeException(e1);
+				}
+				throw new RuntimeException(e);
+			}
+		});
 		writer.commit();
 		writer.close();
 	}
@@ -272,7 +280,7 @@ public class Lucene implements CommandLineRunner {
 		if (i == 0)
 			return Arrays.asList("");
 		for (int j = 1; j <= 4 && i >= j; j++) {
-			StringJoiner joiner = new StringJoiner(" ");
+			StringJoiner joiner = new StringJoiner("_");
 			for (int k = i - j; k < i; k++) {
 				joiner.add(words[k]);
 			}
