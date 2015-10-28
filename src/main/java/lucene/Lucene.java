@@ -12,17 +12,9 @@ import java.util.Map;
 import java.util.Scanner;
 import java.util.Stack;
 import java.util.StringJoiner;
+import java.util.concurrent.Future;
 
-import org.apache.lucene.analysis.core.WhitespaceAnalyzer;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.document.Field.Store;
-import org.apache.lucene.document.IntField;
-import org.apache.lucene.document.TextField;
-import org.apache.lucene.index.IndexWriter;
-import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.index.IndexWriterConfig.OpenMode;
-import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.NIOFSDirectory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -34,17 +26,16 @@ import org.springframework.scheduling.concurrent.ScheduledExecutorFactoryBean;
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectWriter;
 
 @SpringBootApplication
 @ComponentScan(basePackages = "lucene")
 @EnableAsync
 public class Lucene implements CommandLineRunner {
 
-	Map<Input, Integer> inputFrequencyMap;
-	List<String> words;
+	private Map<Input, Integer> inputFrequencyMap;
+	private List<String> words;
 	
-	private Directory directory;
+	@Autowired LuceneIndexr indexr;
 
 	public static void main(String[] args) throws IOException {
 		SpringApplication.run(Lucene.class, args);
@@ -58,10 +49,11 @@ public class Lucene implements CommandLineRunner {
 	}
 
 	public void run(String... args) throws Exception {
-		directory = new NIOFSDirectory(new File("lucene").toPath());
+		
 		inputFrequencyMap = new HashMap<>();
 		words = new LinkedList<>();
 		
+		System.out.println();
 		readAndExtract("output", "Physics");
 		readAndExtract("history", "History");
 		addDictionary("words");
@@ -70,9 +62,16 @@ public class Lucene implements CommandLineRunner {
 		ObjectWriter writerWithDefaultPrettyPrinter = mapper.writerWithDefaultPrettyPrinter();
 		writerWithDefaultPrettyPrinter.writeValue(new File("json"),inputFrequencyMap);
 */		
-		
-		createIndex();
-		
+		Future<Void> future = indexr.createIndex(inputFrequencyMap, words);
+		String s = ".";
+		while(!future.isDone()){
+			if(s.length()==4)
+				s = ".";
+			System.out.print("\rWriting Index"+s+"     ");
+			s+=".";
+			Thread.sleep(750);
+		}
+		System.out.println("\rIndex Successfully Written");
 	}
 
 	private void addDictionary(String string) throws FileNotFoundException {
@@ -87,7 +86,8 @@ public class Lucene implements CommandLineRunner {
 	}
 
 	@SuppressWarnings("unchecked")
-	private void readAndExtract(String fileName, String profile) throws IOException, JsonParseException, JsonMappingException {
+	private void readAndExtract(String fileName, String profile) throws IOException, JsonParseException, JsonMappingException, InterruptedException {
+		System.out.println("Processing Profile: "+profile);
 		List<String> strings;
 
 		{
@@ -109,9 +109,8 @@ public class Lucene implements CommandLineRunner {
 		int curr = 0;
 		for (String sentence : strings) {
 			curr++;
-			System.out.println((float) curr / size);
+			System.out.printf("\r%.2f %%           ", (float) (curr*100) / size);
 			String[] words = sentence.split(" ");
-
 			for (int i = 0; i < words.length; i++) {
 
 				List<String> prefix = getPrefix(words, i);
@@ -127,90 +126,10 @@ public class Lucene implements CommandLineRunner {
 				}
 			}
 		}
+		System.out.println();
 	}
 
-	private void createIndex() throws IOException {
-		IndexWriterConfig conf = new IndexWriterConfig(new WhitespaceAnalyzer());
-		conf.setOpenMode(OpenMode.CREATE_OR_APPEND);
-		IndexWriter writer = new IndexWriter(directory, conf);
-		inputFrequencyMap.forEach((input, freq) -> {
-			
-			TextField profile = new TextField("profile", input.getProfile(), Store.NO);
-			TextField prefix = new TextField("prefix", input.getPrefix(), Store.NO);
-			TextField next = new TextField("next", input.getNext(), Store.YES);
-			TextField nextPieces = new TextField("nextPieces", pieces(input.getNext()), Store.NO);
-			TextField user = new TextField("user", String.valueOf(input.getUid()), Store.NO);
-			
-//			NumericDocValuesField frequencyDoc = new NumericDocValuesField("freq", freq);
-			IntField frequency = new IntField("frequency", freq, Store.YES);
-			
-			Document document = new Document();
-			document.add(profile);
-			document.add(prefix);
-			document.add(next);
-			document.add(nextPieces);
-			document.add(user);
-			document.add(frequency);
-//			document.add(frequencyDoc);
-			prefix.setBoost(input.getPrefix().split("_").length*freq);
-			
-			try {
-				writer.addDocument(document);
-			} catch (Exception e) {
-				try {
-					writer.close();
-				} catch (Exception e1) {
-					throw new RuntimeException(e1);
-				}
-				throw new RuntimeException(e);
-			}
-		});
-		
-		words.stream()
-		.sorted((o1,o2) -> o1.length()-o2.length())
-		.forEach(w -> {
-			TextField profile = new TextField("profile", "Dictionary", Store.NO);
-			TextField prefix = new TextField("prefix", "", Store.NO);
-			TextField next = new TextField("next", w, Store.YES);
-			TextField nextPieces = new TextField("nextPieces", pieces(w), Store.NO);
-			TextField user = new TextField("user", String.valueOf(1), Store.NO);
-			
-//			NumericDocValuesField frequencyDoc = new NumericDocValuesField("freq", freq);
-			IntField frequency = new IntField("frequency", 1, Store.YES);
-			
-			Document document = new Document();
-			document.add(profile);
-			document.add(prefix);
-			document.add(next);
-			document.add(nextPieces);
-			document.add(user);
-			document.add(frequency);
-//			document.add(frequencyDoc);
-			
-			try {
-				writer.addDocument(document);
-			} catch (Exception e) {
-				try {
-					writer.close();
-				} catch (Exception e1) {
-					throw new RuntimeException(e1);
-				}
-				throw new RuntimeException(e);
-			}
-		});
-		writer.commit();
-		writer.close();
-	}
-
-	private String pieces(String next) {
-		StringJoiner joiner = new StringJoiner(" ");
-		for (int i = 1; i <= next.length(); i++) {
-			joiner.add(next.substring(0, i).toLowerCase());
-		}
-		return joiner.toString();
-	}
-
-	private List<String> extractSentences(String data) {
+		private List<String> extractSentences(String data) {
 		String[] lines = data.split("([.?!:;,](?=\\s)|\\R)");
 
 		List<String> strings = new LinkedList<String>();
@@ -270,7 +189,6 @@ public class Lucene implements CommandLineRunner {
 
 			strings.add(string);
 		}
-		System.out.println("Done with extraction");
 		return strings;
 	}
 
